@@ -827,20 +827,25 @@ function renderTx(){
     const d=new Date(date);
     const lbl=`${d.getDate()} ${ML[d.getMonth()]}`;
     return`<div><div class="tx-date-header">${lbl}</div>${items.map(r=>{
+      const allRows=getData();
+      const idx=allRows.findIndex(x=>x.date===r.date&&x.type===r.type&&Math.abs(x.amount-r.amount)<0.001&&(x.cat||x.merchant||'')===((r.cat||r.merchant||'')));
       const badges=[];
       if(r.fhsa)badges.push(`<span class="tx-badge" style="background:rgba(232,255,71,.1);color:var(--accent)">FHSA ${fmt(r.fhsa)}</span>`);
       if(r.tfsa)badges.push(`<span class="tx-badge" style="background:rgba(94,184,255,.1);color:var(--blue)">TFSA ${fmt(r.tfsa)}</span>`);
       if(r.rrsp)badges.push(`<span class="tx-badge" style="background:rgba(183,127,255,.1);color:var(--purple)">RRSP ${fmt(r.rrsp)}</span>`);
       if(r.india)badges.push(`<span class="tx-badge" style="background:rgba(255,179,71,.1);color:var(--amber)">India ${fmt(r.india)}</span>`);
-      return`<div class="tx-item" data-date="${r.date}" data-type="${r.type}" data-amount="${r.amount}" data-cat="${r.cat}">
-        <div class="tx-icon" style="background:${catBg(r.cat||r.merchant||'')}">${catIcon(r.cat||r.merchant||'')}</div>
+      const label=r.cat||r.merchant||'—';
+      return`<div class="tx-item" onclick="openEdit(${idx})">
+        <div class="tx-icon" style="background:${catBg(label)}">${catIcon(label)}</div>
         <div class="tx-info">
-          <div class="tx-cat">${r.cat||r.merchant||'—'}</div>
+          <div class="tx-cat">${label}</div>
           ${!r.cat?`<div class="tx-date" style="color:var(--amber)">⚠ tap to categorize</div>`:''}
           ${badges.length?`<div class="tx-badges">${badges.join('')}</div>`:''}
         </div>
-        <div class="tx-amount" style="color:${r.type==='income'?'var(--green)':'var(--text)'}">${r.type==='income'?'+':'-'}${fmt(r.amount)}</div>
-        <button onclick="delByData(this)" style="background:none;border:none;color:var(--text3);font-size:16px;padding:4px 0 4px 10px;cursor:pointer;flex-shrink:0">✕</button>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          <div class="tx-amount" style="color:${r.type==='income'?'var(--green)':'var(--text)'}">${r.type==='income'?'+':'-'}${fmt(r.amount)}</div>
+          <button onclick="event.stopPropagation();delByIdx(${idx})" style="background:none;border:none;color:var(--text3);font-size:16px;padding:4px;cursor:pointer">✕</button>
+        </div>
       </div>`;
     }).join('')}</div>`;
   }).join('');
@@ -849,12 +854,57 @@ function renderTx(){
   document.getElementById('totInvest').textContent=fmt(tInvest);
   bar.style.display='flex';
 }
-function delByData(btn){
-  const item=btn.closest('.tx-item');
-  const{date,type,amount,cat}=item.dataset;
-  let rows=getData();
-  const idx=rows.findIndex(r=>r.date===date&&r.type===type&&Math.abs(r.amount-parseFloat(amount))<0.001&&r.cat===cat);
-  if(idx>=0){rows.splice(idx,1);saveData(rows);}
+function delByIdx(idx){
+  const rows=getData();
+  rows.splice(idx,1);
+  saveData(rows);
+  renderHome();renderTx();
+}
+
+// ═══════════════════════════ EDIT SHEET ═══════════════════════════
+let editIdx=-1;
+function openEdit(idx){
+  const rows=getData();
+  const r=rows[idx];
+  if(!r)return;
+  editIdx=idx;
+  document.getElementById('eDate').value=r.date||'';
+  document.getElementById('eAmount').value=r.amount||'';
+  document.getElementById('eCat').value=r.cat||r.merchant||'';
+  document.getElementById('eType').value=r.type||'expense';
+  document.getElementById('eFHSA').value=r.fhsa||'';
+  document.getElementById('eTFSA').value=r.tfsa||'';
+  document.getElementById('eRRSP').value=r.rrsp||'';
+  document.getElementById('eIndia').value=r.india||'';
+  // populate cat chips
+  document.getElementById('eCatChips').innerHTML=QUICK_CATS.map(c=>`<button class="cat-chip${(r.cat===c)?' selected':''}" onclick="selEditCat(this,'${c}')">${catIcon(c)} ${c}</button>`).join('');
+  document.getElementById('editOverlay').classList.add('open');
+}
+function selEditCat(btn,cat){
+  document.getElementById('eCat').value=cat;
+  document.querySelectorAll('#eCatChips .cat-chip').forEach(b=>b.classList.remove('selected'));
+  btn.classList.add('selected');
+}
+function closeEdit(){document.getElementById('editOverlay').classList.remove('open');editIdx=-1;}
+function onEditOverlayClick(e){if(e.target===e.currentTarget)closeEdit();}
+function saveEdit(){
+  if(editIdx<0)return;
+  const rows=getData();
+  const r=rows[editIdx];
+  if(!r)return;
+  const cat=document.getElementById('eCat').value.trim();
+  r.date=document.getElementById('eDate').value||r.date;
+  r.amount=parseFloat(document.getElementById('eAmount').value)||r.amount;
+  r.type=document.getElementById('eType').value;
+  r.cat=cat;
+  r.merchant=cat?'':r.merchant; // clear merchant if cat assigned
+  r.fhsa=parseFloat(document.getElementById('eFHSA').value)||0;
+  r.tfsa=parseFloat(document.getElementById('eTFSA').value)||0;
+  r.rrsp=parseFloat(document.getElementById('eRRSP').value)||0;
+  r.india=parseFloat(document.getElementById('eIndia').value)||0;
+  rows.sort((a,b)=>a.date.localeCompare(b.date));
+  saveData(rows);
+  closeEdit();
   renderHome();renderTx();
 }
 function setFilter(f,btn){
@@ -1352,5 +1402,47 @@ function render(){
 }
 render();
 </script>
+<!-- EDIT TRANSACTION SHEET -->
+<div class="sheet-overlay" id="editOverlay" onclick="onEditOverlayClick(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Edit Transaction</div>
+    <div class="sheet-body">
+      <div class="field-group">
+        <div class="field-label">Type</div>
+        <select class="field-input" id="eType" style="font-family:'DM Mono',monospace">
+          <option value="expense">Expense</option>
+          <option value="income">Income</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Amount ($)</div>
+        <input class="field-input amount-input" id="eAmount" type="number" inputmode="decimal" step="0.01"/>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Date</div>
+        <input class="field-input" id="eDate" type="date"/>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Category</div>
+        <input class="field-input" id="eCat" type="text" list="eCatDatalist" placeholder="Select or type…"/>
+        <datalist id="eCatDatalist"></datalist>
+        <div class="cat-chips" id="eCatChips" style="margin-top:8px"></div>
+      </div>
+      <div class="field-group">
+        <div class="field-label">Investments (optional)</div>
+        <div class="inv-fields">
+          <div><div class="field-label" style="margin-bottom:4px">FHSA</div><input class="field-input" id="eFHSA" type="number" inputmode="decimal" placeholder="0"/></div>
+          <div><div class="field-label" style="margin-bottom:4px">TFSA</div><input class="field-input" id="eTFSA" type="number" inputmode="decimal" placeholder="0"/></div>
+          <div><div class="field-label" style="margin-bottom:4px">RRSP</div><input class="field-input" id="eRRSP" type="number" inputmode="decimal" placeholder="0"/></div>
+          <div><div class="field-label" style="margin-bottom:4px">India</div><input class="field-input" id="eIndia" type="number" inputmode="decimal" placeholder="0"/></div>
+        </div>
+      </div>
+      <button class="submit-btn" onclick="saveEdit()">Save Changes</button>
+      <button onclick="if(confirm('Delete this transaction?')){delByIdx(editIdx);closeEdit();}" style="width:100%;padding:13px;border-radius:12px;background:rgba(255,85,85,.1);border:1px solid rgba(255,85,85,.3);color:var(--red);font-family:'Clash Display',sans-serif;font-size:14px;font-weight:700;cursor:pointer;margin-top:10px">Delete Transaction</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
